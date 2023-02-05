@@ -115,17 +115,17 @@ class PlayerNotificationService : MediaBrowserServiceCompat()  {
   private var mShakeDetector: ShakeDetector? = null
   private var shakeSensorUnregisterTask:TimerTask? = null
 
-   /*
-      Service related stuff
-   */
+  /*
+     Service related stuff
+  */
   override fun onBind(intent: Intent): IBinder? {
     Log.d(tag, "onBind")
 
-     // Android Auto Media Browser Service
-     if (SERVICE_INTERFACE == intent.action) {
-       Log.d(tag, "Is Media Browser Service")
-       return super.onBind(intent)
-     }
+    // Android Auto Media Browser Service
+    if (SERVICE_INTERFACE == intent.action) {
+      Log.d(tag, "Is Media Browser Service")
+      return super.onBind(intent)
+    }
     return binder
   }
 
@@ -381,6 +381,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat()  {
     val customActionProviders = mutableListOf(
       JumpBackwardCustomActionProvider(),
       JumpForwardCustomActionProvider(),
+      ChangePlaybackSpeedCustomActionProvider() // Will be pushed to far left
     )
     val metadata = playbackSession.getMediaMetadataCompat(ctx)
     mediaSession.setMetadata(metadata)
@@ -734,19 +735,19 @@ class PlayerNotificationService : MediaBrowserServiceCompat()  {
               startNewPlaybackSession()
             }
           } else {
-              Log.d(tag, "checkCurrentSessionProgress: Playback session still available on server")
-              Handler(Looper.getMainLooper()).post {
-                if (seekBackTime > 0L) {
-                  seekBackward(seekBackTime)
-                }
-
-                currentPlayer.volume = 1F // Volume on sleep timer might have decreased this
-                mediaProgressSyncer.currentPlaybackSession?.let { playbackSession ->
-                  mediaProgressSyncer.play(playbackSession)
-                }
-
-                clientEventEmitter?.onPlayingUpdate(true)
+            Log.d(tag, "checkCurrentSessionProgress: Playback session still available on server")
+            Handler(Looper.getMainLooper()).post {
+              if (seekBackTime > 0L) {
+                seekBackward(seekBackTime)
               }
+
+              currentPlayer.volume = 1F // Volume on sleep timer might have decreased this
+              mediaProgressSyncer.currentPlaybackSession?.let { playbackSession ->
+                mediaProgressSyncer.play(playbackSession)
+              }
+
+              clientEventEmitter?.onPlayingUpdate(true)
+            }
           }
         }
       }
@@ -816,7 +817,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat()  {
   }
 
   fun seekForward(amount: Long) {
-   seekPlayer(getCurrentTime() + amount)
+    seekPlayer(getCurrentTime() + amount)
   }
 
   fun seekBackward(amount: Long) {
@@ -991,19 +992,19 @@ class PlayerNotificationService : MediaBrowserServiceCompat()  {
         val progress: MediaProgressWrapper?
         val mediaDescription:MediaDescriptionCompat
         if (itemInProgress.episode != null) {
-           if (itemInProgress.isLocal) {
-             progress = DeviceManager.dbManager.getLocalMediaProgress("${itemInProgress.libraryItemWrapper.id}-${itemInProgress.episode.id}")
-           } else {
-             progress = mediaManager.serverUserMediaProgress.find { it.libraryItemId == itemInProgress.libraryItemWrapper.id && it.episodeId == itemInProgress.episode.id }
+          if (itemInProgress.isLocal) {
+            progress = DeviceManager.dbManager.getLocalMediaProgress("${itemInProgress.libraryItemWrapper.id}-${itemInProgress.episode.id}")
+          } else {
+            progress = mediaManager.serverUserMediaProgress.find { it.libraryItemId == itemInProgress.libraryItemWrapper.id && it.episodeId == itemInProgress.episode.id }
 
-             // to show download icon
-             val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItemByLId(itemInProgress.libraryItemWrapper.id)
-             localLibraryItem?.let { lli ->
-               val localEpisode = (lli.media as Podcast).episodes?.find { it.serverEpisodeId == itemInProgress.episode.id }
-               itemInProgress.episode.localEpisodeId = localEpisode?.id
-             }
+            // to show download icon
+            val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItemByLId(itemInProgress.libraryItemWrapper.id)
+            localLibraryItem?.let { lli ->
+              val localEpisode = (lli.media as Podcast).episodes?.find { it.serverEpisodeId == itemInProgress.episode.id }
+              itemInProgress.episode.localEpisodeId = localEpisode?.id
+            }
 
-           }
+          }
           mediaDescription = itemInProgress.episode.getMediaDescription(itemInProgress.libraryItemWrapper, progress, ctx)
         } else {
           if (itemInProgress.isLocal) {
@@ -1025,7 +1026,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat()  {
 
         val children = browseTree[parentMediaId]?.map { item ->
           Log.d(tag, "Loading Browser Media Item ${item.description.title}")
-            MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
+          MediaBrowserCompat.MediaItem(item.description, MediaBrowserCompat.MediaItem.FLAG_BROWSABLE)
         }
         result.sendResult(children as MutableList<MediaBrowserCompat.MediaItem>?)
       }
@@ -1170,6 +1171,39 @@ class PlayerNotificationService : MediaBrowserServiceCompat()  {
         getContext().getString(R.string.action_skip_backward),
         R.drawable.skip_previous_24
       ).build()
+    }
+  }
+
+  inner class ChangePlaybackSpeedCustomActionProvider : CustomActionProvider {
+    override fun onCustomAction(player: Player, action: String, extras: Bundle?) {
+      /*
+      This does not appear to ever get called. Instead, MediaSessionCallback.onCustomAction() is
+      responsible to reacting to a custom action.
+       */
+    }
+
+    override fun getCustomAction(player: Player): PlaybackStateCompat.CustomAction? {
+      val playbackRate = mediaManager.getSavedPlaybackRate()
+      Log.d(tag, "EXTRAS2222 $playbackRate")
+      val drawable: Int = when (playbackRate) {
+        0.5f -> R.drawable.ic_play_speed_0_5x
+        1.0f -> R.drawable.ic_play_speed_1_0x
+        1.2f -> R.drawable.ic_play_speed_1_2x
+        1.5f -> R.drawable.ic_play_speed_1_5x
+        2.0f -> R.drawable.ic_play_speed_2_0x
+        3.0f -> R.drawable.ic_play_speed_3_0x
+        // anything set above 3 will be show the 3x to save from creating 100 icons
+        else -> R.drawable.ic_play_speed_3_0x
+      }
+      val customActionExtras = Bundle()
+      customActionExtras.putFloat("speed", playbackRate)
+      return PlaybackStateCompat.CustomAction.Builder(
+        CUSTOM_ACTION_CHANGE_SPEED,
+        getContext().getString(R.string.action_skip_backward),
+        drawable
+      )
+        .setExtras(customActionExtras)
+        .build()
     }
   }
 }

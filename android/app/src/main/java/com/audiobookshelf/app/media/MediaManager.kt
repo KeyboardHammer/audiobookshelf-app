@@ -12,6 +12,7 @@ import java.util.*
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.json.JSONException
+import org.json.JSONObject
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -59,6 +60,33 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
       }
     }
     return 1f
+  }
+
+  fun setSavedPlaybackRate(newRate: Float) {
+    val sharedPrefs = ctx.getSharedPreferences("CapacitorStorage", Activity.MODE_PRIVATE)
+    val sharedPrefEditor = sharedPrefs.edit()
+    if (sharedPrefs != null) {
+      val userSettingsPref = sharedPrefs.getString("userSettings", null)
+      if (userSettingsPref != null) {
+        try {
+          val userSettings = JSObject(userSettingsPref)
+          userSettings.put("playbackRate", newRate.toDouble())
+          sharedPrefEditor.putString("userSettings", userSettings.toString())
+          sharedPrefEditor.commit()
+          userSettingsPlaybackRate = newRate
+          Log.d(tag, "Saved userSettings JSON from Android Auto")
+        } catch(je:JSONException) {
+          Log.e(tag, "Failed to save userSettings JSON ${je.localizedMessage}")
+        }
+      } else {
+        // Not sure if this is the best place for this, but if a user has not changed any user settings in the app
+        // the object will not exist yet, could be moved to a centralized place or created on first app load
+        var userSettings = JSONObject()
+        userSettings.put("playbackRate", newRate.toDouble())
+        sharedPrefEditor.putString("userSettings", userSettings.toString())
+        Log.d(tag, "Created and saved userSettings JSON from Android Auto")
+      }
+    }
   }
 
   fun checkResetServerItems() {
@@ -122,58 +150,58 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
   }
 
   fun loadPodcastEpisodeMediaBrowserItems(libraryItemId:String, ctx:Context, cb: (MutableList<MediaBrowserCompat.MediaItem>) -> Unit) {
-      loadLibraryItem(libraryItemId) { libraryItemWrapper ->
-        Log.d(tag, "Loaded Podcast library item $libraryItemWrapper")
+    loadLibraryItem(libraryItemId) { libraryItemWrapper ->
+      Log.d(tag, "Loaded Podcast library item $libraryItemWrapper")
 
-        libraryItemWrapper?.let {
-          if (libraryItemWrapper is LocalLibraryItem) { // Local podcast episodes
-            if (libraryItemWrapper.mediaType != "podcast" || libraryItemWrapper.media.getAudioTracks().isEmpty()) {
-              cb(mutableListOf())
-            } else {
-              val podcast = libraryItemWrapper.media as Podcast
-              selectedLibraryItemId = libraryItemWrapper.id
-              selectedPodcast = podcast
+      libraryItemWrapper?.let {
+        if (libraryItemWrapper is LocalLibraryItem) { // Local podcast episodes
+          if (libraryItemWrapper.mediaType != "podcast" || libraryItemWrapper.media.getAudioTracks().isEmpty()) {
+            cb(mutableListOf())
+          } else {
+            val podcast = libraryItemWrapper.media as Podcast
+            selectedLibraryItemId = libraryItemWrapper.id
+            selectedPodcast = podcast
 
-              val children = podcast.episodes?.map { podcastEpisode ->
-                Log.d(tag, "Local Podcast Episode ${podcastEpisode.title} | ${podcastEpisode.id}")
+            val children = podcast.episodes?.map { podcastEpisode ->
+              Log.d(tag, "Local Podcast Episode ${podcastEpisode.title} | ${podcastEpisode.id}")
 
-                val progress = DeviceManager.dbManager.getLocalMediaProgress("${libraryItemWrapper.id}-${podcastEpisode.id}")
-                val description = podcastEpisode.getMediaDescription(libraryItemWrapper, progress, ctx)
+              val progress = DeviceManager.dbManager.getLocalMediaProgress("${libraryItemWrapper.id}-${podcastEpisode.id}")
+              val description = podcastEpisode.getMediaDescription(libraryItemWrapper, progress, ctx)
 
-                MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)
-              }
-              children?.let { cb(children as MutableList) } ?: cb(mutableListOf())
+              MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)
             }
-          } else if (libraryItemWrapper is LibraryItem) { // Server podcast episodes
-            if (libraryItemWrapper.mediaType != "podcast" || libraryItemWrapper.media.getAudioTracks().isEmpty()) {
-              cb(mutableListOf())
-            } else {
-              val podcast = libraryItemWrapper.media as Podcast
-              podcast.episodes?.forEach { podcastEpisode ->
-                podcastEpisodeLibraryItemMap[podcastEpisode.id] = LibraryItemWithEpisode(libraryItemWrapper, podcastEpisode)
-              }
-              selectedLibraryItemId = libraryItemWrapper.id
-              selectedPodcast = podcast
-
-              val children = podcast.episodes?.map { podcastEpisode ->
-
-                val progress = serverUserMediaProgress.find { it.libraryItemId == libraryItemWrapper.id && it.episodeId == podcastEpisode.id }
-
-                // to show download icon
-                val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItemByLId(libraryItemWrapper.id)
-                localLibraryItem?.let { lli ->
-                  val localEpisode = (lli.media as Podcast).episodes?.find { it.serverEpisodeId == podcastEpisode.id }
-                  podcastEpisode.localEpisodeId = localEpisode?.id
-                }
-
-                val description = podcastEpisode.getMediaDescription(libraryItemWrapper, progress, ctx)
-                MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)
-              }
-              children?.let { cb(children as MutableList) } ?: cb(mutableListOf())
+            children?.let { cb(children as MutableList) } ?: cb(mutableListOf())
+          }
+        } else if (libraryItemWrapper is LibraryItem) { // Server podcast episodes
+          if (libraryItemWrapper.mediaType != "podcast" || libraryItemWrapper.media.getAudioTracks().isEmpty()) {
+            cb(mutableListOf())
+          } else {
+            val podcast = libraryItemWrapper.media as Podcast
+            podcast.episodes?.forEach { podcastEpisode ->
+              podcastEpisodeLibraryItemMap[podcastEpisode.id] = LibraryItemWithEpisode(libraryItemWrapper, podcastEpisode)
             }
+            selectedLibraryItemId = libraryItemWrapper.id
+            selectedPodcast = podcast
+
+            val children = podcast.episodes?.map { podcastEpisode ->
+
+              val progress = serverUserMediaProgress.find { it.libraryItemId == libraryItemWrapper.id && it.episodeId == podcastEpisode.id }
+
+              // to show download icon
+              val localLibraryItem = DeviceManager.dbManager.getLocalLibraryItemByLId(libraryItemWrapper.id)
+              localLibraryItem?.let { lli ->
+                val localEpisode = (lli.media as Podcast).episodes?.find { it.serverEpisodeId == podcastEpisode.id }
+                podcastEpisode.localEpisodeId = localEpisode?.id
+              }
+
+              val description = podcastEpisode.getMediaDescription(libraryItemWrapper, progress, ctx)
+              MediaBrowserCompat.MediaItem(description, MediaBrowserCompat.MediaItem.FLAG_PLAYABLE)
+            }
+            children?.let { cb(children as MutableList) } ?: cb(mutableListOf())
           }
         }
       }
+    }
   }
 
   private fun loadLibraries(cb: (List<Library>) -> Unit) {
@@ -226,7 +254,7 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
         var lookupMediaProgress = true
 
         if (!serverConfigIdUsed.isNullOrEmpty() && serverConfigLastPing > 0L && System.currentTimeMillis() - serverConfigLastPing < 5000) {
-            Log.d(tag, "checkSetValidServerConnectionConfig last ping less than a 5 seconds ago")
+          Log.d(tag, "checkSetValidServerConnectionConfig last ping less than a 5 seconds ago")
           hasValidConn = true
           lookupMediaProgress = false
         } else {
